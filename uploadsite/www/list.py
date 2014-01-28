@@ -7,6 +7,7 @@ import urlparse
 import cgitb; cgitb.enable(format='text')
 
 import upload
+import cgiutils
 
 def main():
     clipsDir = upload.getClipsDir()
@@ -23,7 +24,7 @@ def main():
         timestamp = int(timestamp)
         fullerPath = os.path.join(clipsDir, f)
 
-        scriptUri = os.environ["SCRIPT_URI"]
+        scriptUri = cgiutils.getBaseURL()
         lastSlash = scriptUri.rfind("/")
         parentUri = scriptUri[:lastSlash + 1]
         url = parentUri + fullerPath
