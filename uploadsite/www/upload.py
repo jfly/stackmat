@@ -69,6 +69,8 @@ def main():
         return sendError("Uploaded file size is %s bytes. It may not be larger than %s bytes" % ( filesize, MAX_FILE_SIZE_BYTES ))
     waveFile = wave.open(audioFile.file, "r")
     timeSeconds = (1.0 * waveFile.getnframes()) / waveFile.getframerate()
+    del wavFile
+    audioFile.file.seek(0) # seek back to the start
 
     timestamp = int(time.time())
     fileName = "%s-%s.wav" % ( timeStr, timestamp )
