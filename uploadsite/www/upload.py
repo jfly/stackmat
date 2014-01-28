@@ -72,6 +72,8 @@ def main():
     del waveFile
     audioFile.file.seek(0) # seek back to the start
 
+    # Note that timeStr has been sanitized, and timestamp is definitely
+    # path safe. There should be no injection vulnerabilities here.
     timestamp = int(time.time())
     fileName = "%s-%s.wav" % ( timeStr, timestamp )
     destFilename = os.path.join(clipsDir, fileName)
