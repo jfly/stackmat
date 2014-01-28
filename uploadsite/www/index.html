@@ -128,7 +128,7 @@ var analyzerNode;
 var recorder;
 function startUserMedia(stream) {
     var input = audioContext.createMediaStreamSource(stream);
-    recorder = new Recorder(input);
+    recorder = new Recorder(input, { workerPath: 'recorder/recorderWorker.js' });
 
     var regularGain = audioContext.createGain();
     input.connect(regularGain);
