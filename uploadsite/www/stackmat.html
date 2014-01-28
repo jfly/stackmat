@@ -1,0 +1,369 @@
+<html>
+
+<head>
+
+<title>Stackmat Uploader</title>
+
+<style>
+
+canvas {
+    border: 1px solid black;
+}
+
+#recordButton {
+    width: 150px;
+}
+
+#fftVisualization {
+    width: 100%;
+    height: 50px;
+    vertical-align: middle;
+}
+
+.timeVisualization {
+    margin-top: 5px;
+    margin-bottom: 5px;
+    width: 100%;
+    height: 45%;
+}
+
+</style>
+
+<script src="recorder/recorder.js"></script>
+<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+<script src="http://code.highcharts.com/stock/highstock.js"></script>
+
+<script>
+(function() {
+
+var recordTimeSeconds = 1;
+var audioContext;
+var recordButton;
+var recordingStart = null;
+window.addEventListener("load", function() {
+    // webkit shim
+    window.AudioContext = window.AudioContext || window.webkitAudioContext;
+    navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia;
+
+    audioContext = new AudioContext();
+
+    navigator.getUserMedia({audio: true}, startUserMedia, function(e) {
+        console.log('No live audio input: ' + e);
+    });
+
+    recordButton = document.getElementById("recordButton");
+    var recordStr = "Record Signal";
+    recordButton.innerHTML = recordStr;
+    recordButton.disabled = true;
+    recordButton.addEventListener("click", function() {
+        recorder.clear();
+        recorder.record();
+        recordingStart = Date.now();
+        updateRecordButtonAndMaybeStopRecording();
+    });
+
+    function updateRecordButtonAndMaybeStopRecording() {
+        var secondsRecorded = (Date.now() - recordingStart) / 1000.0;
+        var remainingSeconds = recordTimeSeconds - secondsRecorded;
+        var postRecording = document.getElementById("postRecording");
+        if(remainingSeconds <= 0) {
+            recordButton.disabled = false;
+            recordButton.innerHTML = recordStr;
+            recorder.stop();
+            recorder.getBuffer(function(buffer) {
+                redrawChannels(buffer);
+            });
+            postRecording.style.display = '';
+        } else {
+            recordButton.disabled = true;
+            recordButton.innerHTML = "Recording " + remainingSeconds.toFixed(2);
+            setTimeout(updateRecordButtonAndMaybeStopRecording, 10);
+            postRecording.style.display = 'none';
+        }
+    }
+
+    var timeField = document.getElementById("time");
+    timeField.addEventListener("change", function() {
+        var postTimeEntry = document.getElementById("postTimeEntry");
+        postTimeEntry.style.display = "";
+    });
+
+    var submitButton = document.getElementById("upload");
+    var defaultSubmitText = "Submit My Signal";
+    submitButton.innerHTML = defaultSubmitText;
+    submitButton.addEventListener("click", function() {
+        submitButton.innerHTML = "Submitting...";
+
+        recorder.exportWAV(function(wavFile) {
+            var fd = new FormData();
+            fd.append("time", timeField.value);
+            fd.append("file", wavFile);
+            var request = $.ajax({
+                type: "POST",
+                url: "upload.py",
+                dataType: "JSON",
+                processData: false,
+                contentType: false,
+                data: fd
+            });
+            request.fail(function(xhr, textStatus, errorThrown) {
+                alert("Upload failed: " + textStatus + ": " + errorThrown.toString() + "\n\nServer's response:\n\n" + xhr.responseText);
+            });
+            request.done(function(msg) {
+                if(msg.error) {
+                    console.log(msg.error);
+                    alert("Upload failed: " + msg.error);
+                } else {
+                    alert("Upload succeeded!");
+                }
+            });
+            request.always(function() {
+                submitButton.innerHTML = defaultSubmitText;
+            });
+        });
+    });
+});
+
+var analyzerNode;
+var recorder;
+function startUserMedia(stream) {
+    var input = audioContext.createMediaStreamSource(stream);
+    recorder = new Recorder(input);
+
+    var regularGain = audioContext.createGain();
+    input.connect(regularGain);
+
+    analyzerNode = audioContext.createAnalyser();
+    analyzerNode.fftSize = 2048;
+    regularGain.connect(analyzerNode);
+
+    var zeroGain = audioContext.createGain();
+    zeroGain.gain.value = 0.0;
+    regularGain.connect(zeroGain);
+    zeroGain.connect(audioContext.destination);
+
+    recordButton.disabled = false;
+    startRendering();
+
+    var postAudioApi = document.getElementById("postAudioApi");
+    postAudioApi.style.display = "";
+}
+
+var animation = null;
+function startRendering() {
+    if(animation !== null) {
+        return;
+    }
+    renderLoop();
+}
+
+function stopRendering() {
+    if(animation !== null) {
+        cancelAnimationFrame(animation);
+        animation = null;
+    }
+}
+
+function renderLoop(time) {
+    render(time);
+    animation = requestAnimationFrame(renderLoop);
+}
+
+function render(time) {
+    var freqByteData = new Uint8Array(analyzerNode.frequencyBinCount);
+    analyzerNode.getByteFrequencyData(freqByteData); 
+
+    var canvas = document.getElementById("fftVisualization");
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    canvasWidth = canvas.width;
+    canvasHeight = canvas.height;
+    var fftContext = canvas.getContext('2d');
+
+    // COPIED FROM http://webaudiodemos.appspot.com/AudioRecorder/js/main.js
+    var SPACING = 30;
+    var BAR_WIDTH = 30;
+    var numBars = Math.round(canvasWidth / SPACING);
+
+    fftContext.clearRect(0, 0, canvasWidth, canvasHeight);
+    fftContext.fillStyle = '#F6D565';
+    fftContext.lineCap = 'round';
+    var multiplier = analyzerNode.frequencyBinCount / numBars;
+
+    // Draw rectangle for each frequency bin.
+    for (var i = 0; i < numBars; ++i) {
+        var magnitude = 0;
+        var offset = Math.floor( i * multiplier );
+        // gotta sum/average the block, or we miss narrow-bandwidth spikes
+        for (var j = 0; j< multiplier; j++)
+            magnitude += freqByteData[offset + j];
+        magnitude = magnitude / multiplier;
+        var magnitude2 = freqByteData[i * multiplier];
+        fftContext.fillStyle = "hsl( " + Math.round((i*360)/numBars) + ", 100%, 50%)";
+        fftContext.fillRect(i * SPACING, canvasHeight, BAR_WIDTH, -magnitude);
+    }
+}
+
+function redrawChannels(channels) {
+    drawChannels(channels[0], channels[1]);
+}
+
+// NOTE: These aren't real milliseconds, they're the fake milliseconds
+// we're using in getMillisecondsPerSample.
+var APPROX_MILLIS_PER_SIGNAL = 5000;
+function getMillisecondsPerSample() {
+    var samplesPerSecond = audioContext.sampleRate;
+    var secondsPerSample = 1.0 / samplesPerSecond;
+    var millsecondsPerSecond = 1000.0;
+    var millisecondsPerSample = secondsPerSample * millsecondsPerSecond;
+
+    // Unfortunately, HighStocks seems to act up when the time period between
+    // samples is very small (perhaps they didn't deal with the < 1ms case?)
+    millisecondsPerSample = 1;
+
+    return millisecondsPerSample;
+}
+
+function doTimestampSamples(samples) {
+    // For some reason, HighStocks doesn't like Float32Arrays, so
+    // we need a regular array.
+    samples = Array.prototype.slice.call(samples);
+
+    var millisecondsPerSample = getMillisecondsPerSample();
+    for(var i = 0; i < samples.length; i++) {
+        samples[i] = [i*millisecondsPerSample, samples[i]];
+    }
+    return samples;
+}
+
+function drawChannels(channel0, channel1) {
+    channel0 = doTimestampSamples(channel0);
+    channel1 = doTimestampSamples(channel1);
+
+    var highchart = $('#graphContainer').highcharts('StockChart', {
+        title: {
+            text: ''
+        },
+
+        navigator: {
+            xAxis: {
+                labels: {
+                    // This could get re-enabled if we figure out how to
+                    // make the timestamps accurate in doTimestampSamples()
+                    enabled: false
+                }
+            }
+        },
+        
+        xAxis: {
+            type: 'datetime',
+            dateTimeLabelFormats: {
+                millisecond: '%S.%L',
+            },
+            labels: {
+                // This could get re-enabled if we figure out how to
+                // make the timestamps accurate in doTimestampSamples()
+                enabled: false
+            }
+        },
+
+        yAxis: [{
+            title: {
+                text: 'Channel 0'
+            },
+            height: 200,
+            lineWidth: 2,
+            min: -1.0,
+            max: 1.0
+        }, {
+            title: {
+                text: 'Channel 1'
+            },
+            top: 250,
+            height: 200,
+            offset: 0,
+            lineWidth: 2,
+            min: -1.0,
+            max: 1.0
+        }],
+        
+        rangeSelector : {
+            buttons : [{
+                type : 'millisecond',
+                count : APPROX_MILLIS_PER_SIGNAL,
+                text : 'In'
+            }, {
+                type : 'all',
+                count : 1,
+                text : 'All'
+            }],
+            selected : 2,
+            inputEnabled : false
+        },
+        
+        series: [
+            {
+                name: 'Channel 0',
+                data: channel0,
+                gapSize: null,
+                threshold: null,
+            },
+            {
+                name: 'Channel 1',
+                data: channel1,
+                gapSize: null,
+                yAxis: 1,
+                threshold: null,
+            }
+        ],
+    });
+}
+
+})();
+</script>
+
+</head>
+
+<body>
+
+<h1>Stackmat Uploader</h1>
+
+<h2>About</h2>
+
+<p>
+    This page exists to collect the sounds of stackmats around the globe,
+    with the goal of creating a stackmat library that works for as many people as
+    possible. You can view uploaded clips <a href="">here.</a>
+</p>
+
+<h2>Directions</h2>
+
+<p>
+    Plug in your stackmat and turn it on. You should see a signal below.
+</p>
+<canvas id="fftVisualization"></canvas>
+
+<p id="postAudioApi" style="display: none">
+    Stop your stackmat at a random time. Enter that time here:
+    <input type="text" id="time"></input>
+</p>
+
+<div id="postTimeEntry" style="display: none">
+    If it looks like you've got a signal, record it!
+    <button id="recordButton"></button>
+</div>
+
+<hr />
+
+<div id="postRecording" style="display: none">
+    Thank you for recording your stackmat!
+    Inspect the signal in the graph below.
+    If everything looks okay, please submit your signal!
+    No identifying information will be stored on our server, just the
+    clip, the time you entered for it, and the time at which it was uploaded.
+    <button id="upload"></button>
+    <hr />
+    <div id="graphContainer" style="height: 550px; min-width: 500px"></div>
+</div>
+
+</body>
