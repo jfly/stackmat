@@ -126,8 +126,14 @@ window.addEventListener("load", function() {
 
 var analyzerNode;
 var recorder;
+// It is apparently very important to save input
+// as a global variable. If we don't do this, Firefox
+// seems to randomly close our input stream later on.
+// I suspect that the root cause is that the garbage collector is
+// cleaning up some important state.
+var input;
 function startUserMedia(stream) {
-    var input = audioContext.createMediaStreamSource(stream);
+    input = audioContext.createMediaStreamSource(stream);
     recorder = new Recorder(input, { workerPath: 'recorder/recorderWorker.js' });
 
     var regularGain = audioContext.createGain();
